@@ -77,6 +77,12 @@
               pkgs.zig
               pkgs.zig.hook
             ];
+
+            doCheck = true;
+
+            checkPhase = ''
+              zig build test
+            '';
           };
         };
     in
