@@ -67,22 +67,24 @@
             ];
           };
 
-          nulibc = stdenv.mkDerivation {
-            pname = "nulibc";
-            version = self.shortRev or "dirty";
+          nulibc = callPackage ./nix/package.nix { inherit self; };
 
-            src = lib.cleanSource self;
+          libcCrossChooser = name:
+            if name == "nulibc" then targetPackages.nulibc or nulibc
+            else prev.libcCrossChooser name;
 
-            nativeBuildInputs = [
-              pkgs.zig
-              pkgs.zig.hook
-            ];
-
-            doCheck = true;
-
-            checkPhase = ''
-              zig build test
-            '';
+          pkgsNulibc = import "${nixpkgs}" {
+            inherit config;
+            overlays = [ (self': super': {
+              pkgsNulibc = super';
+            })] ++ overlays;
+            crossSystem = stdenv.hostPlatform // {
+              libc = "nulibc";
+              useLLVM = true;
+              linker = "lld";
+              isStatic = true;
+            };
+            localSystem = stdenv.hostPlatform;
           };
         };
     in

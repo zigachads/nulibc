@@ -12,7 +12,9 @@ pub fn getauxval(t: c_ulong) callconv(.C) c_ulong {
 }
 
 comptime {
-    if (options.use_exports) {
-        @export(&getauxval, .{ .name = "getauxval" });
+    if (options.lib_variant) |lib_variant| {
+        if (lib_variant == .c) {
+            @export(&getauxval, .{ .name = "getauxval" });
+        }
     }
 }

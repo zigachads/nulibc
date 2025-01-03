@@ -4,7 +4,9 @@ const options = @import("options");
 pub const getauxval = @import("auxv/getauxval.zig");
 
 comptime {
-    if (options.use_exports) {
-        _ = getauxval;
+    if (options.lib_variant) |lib_variant| {
+        if (lib_variant == .c) {
+            _ = getauxval;
+        }
     }
 }

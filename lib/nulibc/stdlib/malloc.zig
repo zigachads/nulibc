@@ -25,7 +25,9 @@ pub fn malloc(size: usize) callconv(.C) ?*anyopaque {
 }
 
 comptime {
-    if (options.use_exports) {
-        @export(&malloc, .{ .name = "malloc" });
+    if (options.lib_variant) |lib_variant| {
+        if (lib_variant == .c) {
+            @export(&malloc, .{ .name = "malloc" });
+        }
     }
 }

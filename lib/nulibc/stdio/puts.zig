@@ -11,7 +11,9 @@ pub fn puts(s: [*:0]const c_char) callconv(.C) usize {
 }
 
 comptime {
-    if (options.use_exports) {
-        @export(&puts, .{ .name = "puts" });
+    if (options.lib_variant) |lib_variant| {
+        if (lib_variant == .c) {
+            @export(&puts, .{ .name = "puts" });
+        }
     }
 }

@@ -22,7 +22,10 @@ fn appendUnique(list: *std.ArrayList([]const u8), value: []const u8) !bool {
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
-    const target = b.standardTargetOptions(.{});
+    var target = b.standardTargetOptions(.{});
+
+    target.result.dynamic_linker = std.Target.DynamicLinker.none;
+
     const linkage = b.option(std.builtin.LinkMode, "linkage", "whether to statically or dynamically link the library") orelse .static;
     const strict_dealloc = b.option(bool, "strict-dealloc", "whether to enforce deallocations") orelse (optimize == .Debug);
 
@@ -38,9 +41,9 @@ pub fn build(b: *std.Build) void {
             .{
                 .name = "options",
                 .module = (Options{
-                    .use_exports = false,
                     .strict_dealloc = strict_dealloc,
                     .target = target.result,
+                    .lib_variant = null,
                 }).make(b).createModule(),
             },
         },
@@ -53,41 +56,77 @@ pub fn build(b: *std.Build) void {
         .file = &include_wf.generated_directory,
     } });
 
-    const libc = std.Build.Step.Compile.create(b, .{
-        .name = "c",
-        .kind = .lib,
-        .linkage = linkage,
-        .version = .{
-            .major = 6,
-            .minor = 0,
-            .patch = 0,
-        },
-        .root_module = .{
-            .target = target,
-            .optimize = optimize,
-            .root_source_file = b.path("lib/nulibc.zig"),
-        },
+    hdrgen_step.addDirectorySourceArg(b.path("include"));
+
+    const libdir_wf = b.addWriteFiles();
+
+    @setEvalBranchQuota(100_000);
+    inline for (comptime std.meta.fieldNames(std.builtin.LinkMode)) |linkage_name| {
+        const sub_linkage = comptime (std.meta.stringToEnum(std.builtin.LinkMode, linkage_name) orelse unreachable);
+        inline for (comptime std.meta.fieldNames(Options.LibVariant)) |lib_variant_name| {
+            const lib_variant = comptime (std.meta.stringToEnum(Options.LibVariant, lib_variant_name) orelse unreachable);
+            const lib = std.Build.Step.Compile.create(b, .{
+                .name = lib_variant_name,
+                .kind = .lib,
+                .linkage = sub_linkage,
+                .version = if (lib_variant == .c) .{
+                    .major = 6,
+                    .minor = 0,
+                    .patch = 0,
+                } else null,
+                .root_module = .{
+                    .target = target,
+                    .optimize = optimize,
+                    .root_source_file = b.path("lib/nulibc.zig"),
+                },
+            });
+
+            lib.no_builtin = true;
+
+            lib.step.dependOn(&hdrgen_step.step);
+
+            lib.installHeadersDirectory(.{ .generated = .{
+                .file = &include_wf.generated_directory,
+            } }, ".", .{});
+
+            lib.root_module.addOptions("options", (Options{
+                .strict_dealloc = strict_dealloc,
+                .target = null,
+                .lib_variant = lib_variant,
+            }).make(b));
+
+            if (sub_linkage == linkage) b.installArtifact(lib);
+
+            _ = libdir_wf.addCopyFile(lib.getEmittedBin(), lib.out_lib_filename);
+        }
+    }
+
+    const ldso = b.addSharedLibrary(.{
+        .name = b.fmt("ld-{s}-{s}", .{ @tagName(target.result.os.tag), @tagName(target.result.cpu.arch) }),
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("startup/ldso.zig"),
     });
 
-    libc.no_builtin = true;
+    b.installArtifact(ldso);
+    _ = libdir_wf.addCopyFile(ldso.getEmittedBin(), ldso.out_lib_filename);
 
-    libc.step.dependOn(&hdrgen_step.step);
+    if (target.result.os.tag == .linux) {
+        const Scrt1 = b.addObject(.{
+            .name = "Scrt1",
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("startup/crt1.zig"),
+        });
 
-    libc.installHeadersDirectory(.{ .generated = .{
-        .file = &include_wf.generated_directory,
-    } }, ".", .{});
+        _ = libdir_wf.addCopyFile(Scrt1.getEmittedBin(), "Scrt1.o");
 
-    libc.root_module.addOptions("options", (Options{
-        .use_exports = true,
-        .strict_dealloc = strict_dealloc,
-        .target = null,
-    }).make(b));
+        b.getInstallStep().dependOn(&b.addInstallArtifact(Scrt1, .{
+            .dest_dir = .{
+                .override = .lib,
+            },
+        }).step);
 
-    b.installArtifact(libc);
-
-    const crtc_wf = b.addWriteFiles();
-
-    const crt1 = if (target.result.os.tag == .linux) blk: {
         const crt1 = b.addObject(.{
             .name = "crt1",
             .target = target,
@@ -95,7 +134,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("startup/crt1.zig"),
         });
 
-        _ = crtc_wf.addCopyFile(crt1.getEmittedBin(), "crt1.o");
+        _ = libdir_wf.addCopyFile(crt1.getEmittedBin(), "crt1.o");
 
         b.getInstallStep().dependOn(&b.addInstallArtifact(crt1, .{
             .dest_dir = .{
@@ -103,11 +142,39 @@ pub fn build(b: *std.Build) void {
             },
         }).step);
 
-        break :blk crt1;
-    } else null;
+        const crti = b.addObject(.{
+            .name = "crti",
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("startup/crti.zig"),
+        });
+
+        _ = libdir_wf.addCopyFile(crti.getEmittedBin(), "crti.o");
+
+        b.getInstallStep().dependOn(&b.addInstallArtifact(crti, .{
+            .dest_dir = .{
+                .override = .lib,
+            },
+        }).step);
+
+        const crtn = b.addObject(.{
+            .name = "crtn",
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("startup/crtn.zig"),
+        });
+
+        _ = libdir_wf.addCopyFile(crtn.getEmittedBin(), "crtn.o");
+
+        b.getInstallStep().dependOn(&b.addInstallArtifact(crtn, .{
+            .dest_dir = .{
+                .override = .lib,
+            },
+        }).step);
+    }
 
     const libc_install = LibCInstallStep.create(b, .{
-        .crt_dir = crtc_wf.getDirectory(),
+        .crt_dir = libdir_wf.getDirectory(),
         .include_dir = include_wf.getDirectory(),
         .sys_include_dir = include_wf.getDirectory(),
     });
@@ -169,6 +236,7 @@ pub fn build(b: *std.Build) void {
                     .name = full_test_name,
                     .target = target,
                     .optimize = optimize,
+                    .linkage = linkage,
                 });
 
                 test_exec.addCSourceFile(.{
@@ -189,9 +257,7 @@ pub fn build(b: *std.Build) void {
 
                 test_exec.no_builtin = true;
 
-                // TODO: replace with linkLibC once we support enough.
-                test_exec.linkLibrary(libc);
-                if (crt1) |obj| test_exec.addObject(obj);
+                test_exec.linkLibC();
 
                 const test_run = b.addRunArtifact(test_exec);
                 test_run.setName(b.dupe(test_name));

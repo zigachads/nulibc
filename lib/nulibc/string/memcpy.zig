@@ -7,7 +7,9 @@ pub fn memcpy(noalias dest: [*]u8, noalias src: [*]const u8, n: usize) callconv(
 }
 
 comptime {
-    if (options.use_exports) {
-        @export(&memcpy, .{ .name = "memcpy" });
+    if (options.lib_variant) |lib_variant| {
+        if (lib_variant == .c) {
+            @export(&memcpy, .{ .name = "memcpy" });
+        }
     }
 }

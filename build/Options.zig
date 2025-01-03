@@ -1,16 +1,38 @@
 const std = @import("std");
 const Options = @This();
 
+pub const LibVariant = enum {
+    c,
+    m,
+    pthread,
+    dl,
+    rt,
+    util,
+};
+
 strict_dealloc: bool = false,
-use_exports: bool = true,
 target: ?std.Target = null,
+lib_variant: ?LibVariant,
 
 pub fn make(options: Options, b: *std.Build) *std.Build.Step.Options {
     const step = b.addOptions();
     step.contents.appendSlice("const std = @import(\"std\");\n\n") catch @panic("OOM");
 
-    step.addOption(bool, "use_exports", options.use_exports);
+    step.contents.appendSlice("pub const LibVariant = enum {\n") catch @panic("OOM");
+
+    inline for (comptime std.meta.fieldNames(LibVariant)) |lib_variant| {
+        step.contents.writer().print("  {s},\n", .{lib_variant}) catch @panic("OOM");
+    }
+
+    step.contents.appendSlice("};\n") catch @panic("OOM");
+
     step.addOption(bool, "strict_dealloc", options.strict_dealloc);
+
+    if (options.lib_variant) |lib_variant| {
+        step.contents.writer().print("pub const lib_variant: ?LibVariant = .{s};\n", .{@tagName(lib_variant)}) catch @panic("OOM");
+    } else {
+        step.contents.writer().print("pub const lib_variant: ?LibVariant = null;\n", .{}) catch @panic("OOM");
+    }
 
     // Based on "src/Builtin.zig"
     // https://github.com/ziglang/zig/blob/01081cc8e8b79104f7992d60dbd1bc8682e8fedf/src/Builtin.zig
@@ -125,10 +147,10 @@ pub fn make(options: Options, b: *std.Build) *std.Build.Step.Options {
         step.contents.appendSlice(
             \\};
             \\pub const target: ?std.Target = .{
-            \\    .cpu = cpu,
-            \\    .os = os,
-            \\    .abi = abi,
-            \\    .ofmt = object_format,
+            \\    .cpu = cpu.?,
+            \\    .os = os.?,
+            \\    .abi = abi.?,
+            \\    .ofmt = object_format.?,
             \\
         ) catch @panic("OOM");
 

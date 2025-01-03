@@ -13,7 +13,7 @@ const native_os = builtin.os.tag;
 
 const MainFunc = ?*const fn (argc: usize, argv: [*]const [*:0]const u8, envp: [*]const [*:0]const u8) callconv(.C) u8;
 
-pub const main: MainFunc = if (options.use_exports) @extern(MainFunc, .{
+pub const main: MainFunc = if (options.lib_variant != null and options.lib_variant == .c) @extern(MainFunc, .{
     .name = "main",
 }) else null;
 
@@ -186,7 +186,9 @@ fn maybeIgnoreSigpipe() void {
 fn noopSigHandler(_: i32) callconv(.c) void {}
 
 comptime {
-    if (options.use_exports) {
-        @export(&startMain, .{ .name = "__nulibc_start_main" });
+    if (options.lib_variant) |lib_variant| {
+        if (lib_variant == .c) {
+            @export(&startMain, .{ .name = "__nulibc_start_main" });
+        }
     }
 }

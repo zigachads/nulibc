@@ -1,3 +1,4 @@
+const options = @import("options");
 const internal = @import("../internal.zig");
 
 pub fn free(ptr: *anyopaque) callconv(.C) void {
@@ -18,5 +19,9 @@ pub fn free(ptr: *anyopaque) callconv(.C) void {
 }
 
 comptime {
-    @export(&free, .{ .name = "free" });
+    if (options.lib_variant) |lib_variant| {
+        if (lib_variant == .c) {
+            @export(&free, .{ .name = "free" });
+        }
+    }
 }

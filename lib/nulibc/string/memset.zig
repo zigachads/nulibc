@@ -6,7 +6,9 @@ pub fn memset(dest: [*]c_int, c: c_int, n: usize) callconv(.C) [*]const c_int {
 }
 
 comptime {
-    if (options.use_exports) {
-        @export(&memset, .{ .name = "memset" });
+    if (options.lib_variant) |lib_variant| {
+        if (lib_variant == .c) {
+            @export(&memset, .{ .name = "memset" });
+        }
     }
 }

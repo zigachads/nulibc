@@ -20,6 +20,11 @@ const Type = struct {
 
 const TypeArray = std.ArrayList(Type);
 
+fn exists(self: std.fs.Dir, sub_path: []const u8, flags: std.fs.File.OpenFlags) bool {
+    self.access(sub_path, flags) catch return false;
+    return true;
+}
+
 fn appendUnique(list: *std.ArrayList([]const u8), value: []const u8) !bool {
     for (list.items) |item| {
         if (std.mem.eql(u8, item, value)) return false;
@@ -47,6 +52,7 @@ fn fileNameForType(comptime T: type) ?[]const u8 {
         i64 => "int64_t",
         usize => "size_t",
         isize => "ssize_t",
+        bool => "bool",
         else => null,
     };
 }
@@ -66,7 +72,9 @@ fn formatType(comptime T: type, name: []const u8, writer: std.io.AnyWriter) !voi
 
             try formatType(param.type.?, @typeName(param.type.?), writer);
 
-            if (param.is_noalias) try writer.writeAll(" __restricted");
+            // FIXME: this messes things up
+            // if (param.is_noalias) try writer.writeAll(" restrict");
+            try writer.print(" arg{}", .{i});
             if (!is_last) try writer.writeAll(", ");
         }
 
@@ -82,8 +90,10 @@ fn formatType(comptime T: type, name: []const u8, writer: std.io.AnyWriter) !voi
         return writer.writeAll(switch (T) {
             c_char => "char",
             c_int => "int",
+            c_long => "long",
             c_short => "short",
             c_ushort => "unsigned short",
+            c_uint => "unsigned int",
             c_ulong => "unsigned long",
             c_ulonglong => "unsigned long long",
             void => "void",
@@ -118,17 +128,40 @@ fn walkNamespace(ns: anytype, types: *TypeArray) !void {
                 defer source.deinit();
 
                 try source.appendSlice("typedef ");
-                if (f == u8) {
+                const add_type = if (f == u8) blk: {
                     try source.appendSlice("unsigned char");
-                } else if (f == i8) {
+                    break :blk false;
+                } else if (f == i8) blk: {
                     try source.appendSlice("signed char");
-                } else {
+                    break :blk false;
+                } else if (f == u16) blk: {
+                    try source.appendSlice("unsigned short");
+                    break :blk false;
+                } else if (f == i16) blk: {
+                    try source.appendSlice("signed short");
+                    break :blk false;
+                } else if (f == u32) blk: {
+                    try source.appendSlice("unsigned int");
+                    break :blk false;
+                } else if (f == i32) blk: {
+                    try source.appendSlice("signed int");
+                    break :blk false;
+                } else if (f == u64) blk: {
+                    try source.appendSlice("unsigned long long");
+                    break :blk false;
+                } else if (f == i64) blk: {
+                    try source.appendSlice("signed long long");
+                    break :blk false;
+                } else blk: {
                     try formatType(f, decl.name, source.writer().any());
-                }
+                    break :blk true;
+                };
                 try source.appendSlice(" " ++ decl.name ++ ";");
 
+                const inner_typename = if (add_type) fileNameForType(f) else null;
+
                 try types.append(.{
-                    .types = if (fileNameForType(f)) |td| try types.allocator.dupe([]const u8, &.{
+                    .types = if (inner_typename) |td| try types.allocator.dupe([]const u8, &.{
                         td,
                     }) else try types.allocator.alloc([]const u8, 0),
                     .name = decl.name,
@@ -138,7 +171,64 @@ fn walkNamespace(ns: anytype, types: *TypeArray) !void {
                         @typeName(ns)[(root_ns.len + 1)..] ++ ".h",
                     }),
                 });
+            } else if (i == .@"enum") {
+                var source = std.ArrayList(u8).init(types.allocator);
+                defer source.deinit();
+
+                try source.appendSlice("typedef enum {\n");
+
+                inline for (i.@"enum".fields, 0..) |field, x| {
+                    const is_last = (i.@"enum".fields.len - 1) == x;
+
+                    try source.appendSlice("  " ++ field.name);
+                    if (!is_last) try source.append(',');
+                    try source.append('\n');
+                }
+
+                try source.appendSlice("} " ++ decl.name ++ ";");
+
+                try types.append(.{
+                    .types = try types.allocator.alloc([]const u8, 0),
+                    .name = decl.name,
+                    .header = "nulibc-types/" ++ decl.name ++ ".h",
+                    .source = try source.toOwnedSlice(),
+                    .required_by = try types.allocator.dupe([]const u8, &.{
+                        @typeName(ns)[(root_ns.len + 1)..] ++ ".h",
+                    }),
+                });
             } else if (i == .@"struct") {
+                if (i.@"struct".fields.len > 0) {
+                    var source = std.ArrayList(u8).init(types.allocator);
+                    defer source.deinit();
+
+                    try source.appendSlice("typedef struct {\n");
+
+                    var field_types = std.ArrayList([]const u8).init(types.allocator);
+                    defer field_types.deinit();
+
+                    inline for (i.@"struct".fields) |field| {
+                        if (fileNameForType(field.type)) |pt| {
+                            _ = try appendUnique(&field_types, pt);
+                        }
+
+                        try source.appendSlice("  ");
+                        try formatType(field.type, @typeName(field.type), source.writer().any());
+                        try source.appendSlice(" " ++ field.name ++ ";\n");
+                    }
+
+                    try source.appendSlice("} " ++ decl.name ++ ";");
+
+                    try types.append(.{
+                        .types = try field_types.toOwnedSlice(),
+                        .name = decl.name,
+                        .header = "nulibc-types/" ++ decl.name ++ ".h",
+                        .source = try source.toOwnedSlice(),
+                        .required_by = try types.allocator.dupe([]const u8, &.{
+                            @typeName(ns)[(root_ns.len + 1)..] ++ ".h",
+                        }),
+                    });
+                }
+
                 try walkNamespace(f, types);
             }
         } else if (t == .@"fn") {
@@ -191,7 +281,6 @@ pub fn main() !void {
 
     var outdir = blk: {
         const path = argv.next() orelse @panic("Missing output directory.");
-
         if (std.fs.path.isAbsolute(path)) {
             break :blk try (std.fs.openDirAbsolute(path, .{}) catch |e| switch (e) {
                 error.FileNotFound => blk2: {
@@ -211,6 +300,15 @@ pub fn main() !void {
         });
     };
     defer outdir.close();
+
+    var overlaydir = blk: {
+        const path = argv.next() orelse @panic("Missing overlay directory.");
+        if (std.fs.path.isAbsolute(path)) {
+            break :blk try std.fs.openDirAbsolute(path, .{});
+        }
+        break :blk try std.fs.cwd().openDir(path, .{});
+    };
+    defer overlaydir.close();
 
     var types = TypeArray.init(alloc);
     defer {
@@ -238,6 +336,11 @@ pub fn main() !void {
                 error.PathAlreadyExists => {},
                 else => return e,
             };
+        }
+
+        if (exists(overlaydir, h, .{})) {
+            try overlaydir.copyFile(h, outdir, h, .{});
+            continue;
         }
 
         var file = try outdir.createFile(h, .{});
@@ -272,10 +375,19 @@ pub fn main() !void {
         }
 
         for (inner_types.items) |it| {
-            try file.writer().print(
-                \\#include "nulibc-types/{s}.h"
-                \\
-            , .{it});
+            const need_relpath = if (std.fs.path.dirname(h)) |parent| std.mem.eql(u8, parent, "nulibc-types") else false;
+
+            if (need_relpath) {
+                try file.writer().print(
+                    \\#include "{s}.h"
+                    \\
+                , .{it});
+            } else {
+                try file.writer().print(
+                    \\#include "nulibc-types/{s}.h"
+                    \\
+                , .{it});
+            }
         }
 
         if (inner_types.items.len > 0 and fn_count > 0) try file.writer().writeByte('\n');
