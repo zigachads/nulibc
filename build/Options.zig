@@ -136,6 +136,40 @@ pub fn make(options: Options, b: *std.Build) *std.Build.Step.Options {
 
                 linux.android,
             }) catch @panic("OOM"),
+            .hurd => |hurd| step.contents.writer().print(
+                \\ .hurd = .{{
+                \\        .range = .{{
+                \\            .min = .{{
+                \\                .major = {},
+                \\                .minor = {},
+                \\                .patch = {},
+                \\            }},
+                \\            .max = .{{
+                \\                .major = {},
+                \\                .minor = {},
+                \\                .patch = {},
+                \\            }},
+                \\        }},
+                \\        .glibc = .{{
+                \\            .major = {},
+                \\            .minor = {},
+                \\            .patch = {},
+                \\        }},
+                \\    }}}},
+                \\
+            , .{
+                hurd.range.min.major,
+                hurd.range.min.minor,
+                hurd.range.min.patch,
+
+                hurd.range.max.major,
+                hurd.range.max.minor,
+                hurd.range.max.patch,
+
+                hurd.glibc.major,
+                hurd.glibc.minor,
+                hurd.glibc.patch,
+            }) catch @panic("OOM"),
             .windows => |windows| step.contents.writer().print(
                 \\ .windows = .{{
                 \\        .min = {c},
