@@ -3,10 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs";
-    systems.url = "github:nix-systems/default-linux";
+    systems.url = "github:nix-systems/default";
     flake-utils.url = "github:numtide/flake-utils";
     zig = {
-      url = "github:ziglang/zig?ref=pull/20511/head";
+      url = "github:ziglang/zig";
       flake = false;
     };
     zon2nix = {
