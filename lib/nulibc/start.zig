@@ -56,7 +56,7 @@ pub fn startMain(argc: usize, argv: [*][*:0]u8, envp: [*][*:0]u8, envp_count: us
             // ARMv6 targets (and earlier) have no support for TLS in hardware.
             // FIXME: Elide the check for targets >= ARMv7 when the target feature API
             // becomes less verbose (and more usable).
-            if (comptime native_arch.isARM()) {
+            if (comptime native_arch.isArm()) {
                 if (at_hwcap & std.os.linux.HWCAP.TLS == 0) {
                     // FIXME: Make __aeabi_read_tp call the kernel helper kuser_get_tls
                     // For the time being use a simple trap instead of a @panic call to
@@ -106,7 +106,7 @@ fn expandStackSize(phdrs: []std.elf.Phdr) void {
         switch (phdr.p_type) {
             std.elf.PT_GNU_STACK => {
                 if (phdr.p_memsz == 0) break;
-                assert(phdr.p_memsz % std.heap.pageSize() == 0);
+                assert(phdr.p_memsz % std.heap.page_size_min == 0);
 
                 // Silently fail if we are unable to get limits.
                 const limits = std.posix.getrlimit(.STACK) catch break;
