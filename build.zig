@@ -52,11 +52,11 @@ pub fn build(b: *std.Build) void {
     const include_wf = b.addNamedWriteFiles("include");
 
     const hdrgen_step = b.addRunArtifact(hdrgen);
-    hdrgen_step.addDirectorySourceArg(.{ .generated = .{
+    hdrgen_step.addDirectoryArg(.{ .generated = .{
         .file = &include_wf.generated_directory,
     } });
 
-    hdrgen_step.addDirectorySourceArg(b.path("include"));
+    hdrgen_step.addDirectoryArg(b.path("include"));
 
     const libdir_wf = b.addWriteFiles();
 
@@ -74,11 +74,11 @@ pub fn build(b: *std.Build) void {
                     .minor = 0,
                     .patch = 0,
                 } else null,
-                .root_module = .{
+                .root_module = b.createModule(.{
                     .target = target,
                     .optimize = optimize,
                     .root_source_file = b.path("lib/nulibc.zig"),
-                },
+                }),
             });
 
             lib.no_builtin = true;
